@@ -70,4 +70,38 @@ function matchRule(from, subject, to, rules) {
   return null;
 }
 
-module.exports = { extractEmail, extractHeader, extractBody, isWhitelisted, matchRule };
+/**
+ * Extract the Pingdom service identifier from a subject line.
+ * e.g. "DOWN alert: ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app) is DOWN"
+ *    → "ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app)"
+ * Returns null if the subject doesn't match the Pingdom pattern.
+ */
+function extractPingdomService(subject) {
+  const m = subject.match(/(?:DOWN|UP) alert:\s*(.+?)\s+is\s+(?:DOWN|UP)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Given a list of pending queue items (parsed JSON objects with subject & date),
+ * return the emailIds of DOWN alerts that should be suppressed because a later
+ * UP alert exists for the same Pingdom service.
+ */
+function findSuppressibleDownAlerts(items) {
+  const dominated = [];
+  const downs = items.filter(i => i.classification === 'ops-alerts' && /DOWN alert/i.test(i.subject));
+  const ups = items.filter(i => i.classification === 'ops-alerts' && /UP alert/i.test(i.subject));
+
+  for (const down of downs) {
+    const service = extractPingdomService(down.subject);
+    if (!service) continue;
+    const downTime = new Date(down.date).getTime();
+    const matchingUp = ups.find(up => {
+      const upService = extractPingdomService(up.subject);
+      return upService === service && new Date(up.date).getTime() > downTime;
+    });
+    if (matchingUp) dominated.push(down.emailId);
+  }
+  return dominated;
+}
+
+module.exports = { extractEmail, extractHeader, extractBody, isWhitelisted, matchRule, extractPingdomService, findSuppressibleDownAlerts };
