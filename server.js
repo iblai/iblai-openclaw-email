@@ -338,16 +338,24 @@ function isWhitelisted(fromEmail) {
 // ---------------------------------------------------------------------------
 // Rule matching
 // ---------------------------------------------------------------------------
-function matchRule(from, subject) {
-  const email = extractEmail(from).toLowerCase();
+function matchRule(from, subject, to) {
+  const fromEmail = extractEmail(from).toLowerCase();
+  const toEmail = to ? extractEmail(to).toLowerCase() : '';
   for (const rule of (config.triage.rules || [])) {
     const m = rule.match;
     // Check from pattern
     if (m.from && m.from !== '*') {
       if (m.from.startsWith('*@')) {
         const domain = m.from.slice(2).toLowerCase();
-        if (!email.endsWith('@' + domain)) continue;
-      } else if (m.from.toLowerCase() !== email) continue;
+        if (!fromEmail.endsWith('@' + domain)) continue;
+      } else if (m.from.toLowerCase() !== fromEmail) continue;
+    }
+    // Check to pattern
+    if (m.to) {
+      if (m.to.startsWith('*@')) {
+        const domain = m.to.slice(2).toLowerCase();
+        if (!toEmail.endsWith('@' + domain)) continue;
+      } else if (m.to.toLowerCase() !== toEmail) continue;
     }
     // Check subject keywords
     if (m.subjectContains && m.subjectContains.length > 0) {
@@ -441,7 +449,7 @@ async function triageCycle() {
         const date = extractHeader(detail, 'Date');
 
         // Pre-check rule to decide if we need the body
-        const preRule = matchRule(from, subject);
+        const preRule = matchRule(from, subject, to);
         const needsAction = preRule && (preRule.action === 'escalate' || preRule.action === 'route');
         let body = '';
         if (needsAction && !config.shadowMode) {
@@ -461,7 +469,7 @@ async function triageCycle() {
         }
 
         // Pre-check: skip rule (drop email silently)
-        const skipCheck = matchRule(from, subject);
+        const skipCheck = matchRule(from, subject, to);
         if (skipCheck && skipCheck.action === 'skip') {
           stats.totalSkipped++;
           markProcessed(msg.id, { from: extractEmail(from), subject, action: 'skipped', classification: skipCheck.name });
@@ -470,7 +478,7 @@ async function triageCycle() {
         }
 
         // Match rule
-        const rule = matchRule(from, subject);
+        const rule = matchRule(from, subject, to);
         const action = rule ? rule.action : 'classify';
         const assignTo = rule ? rule.assignTo : null;
         const model = rule ? rule.model : config.models.classifier;
