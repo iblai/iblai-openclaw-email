@@ -219,6 +219,67 @@ function enqueueAction(item) {
   const doneFile = file + '.done';
   if (fs.existsSync(file) || fs.existsSync(doneFile)) return;
   fs.writeFileSync(file, JSON.stringify(item, null, 2));
+
+  // Notify OpenClaw via webhook if configured
+  if (config.openclaw && config.openclaw.enabled) {
+    notifyOpenClaw(item).catch(e => {
+      console.error('[triage] OpenClaw webhook failed:', e.message);
+      stats.webhookErrors = (stats.webhookErrors || 0) + 1;
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OpenClaw webhook notification — event-driven action processing
+// ---------------------------------------------------------------------------
+function notifyOpenClaw(item) {
+  const oc = config.openclaw;
+  if (!oc || !oc.enabled) return Promise.resolve();
+
+  const url = new URL(oc.hookUrl || 'http://127.0.0.1:18789/hooks/agent');
+  const actionLabel = item.action === 'escalate' ? '🚨 ESCALATION' : '📧 Action needed';
+
+  const payload = JSON.stringify({
+    message: `${actionLabel}: New email from ${item.from}\nSubject: ${item.subject}\n\nBody:\n${(item.body || '').slice(0, 4000)}\n\nClassification: ${item.classification}\nAction: ${item.action}\nAssigned to: ${item.assignTo || 'unassigned'}\nQueue file: ${ACTION_QUEUE_DIR}/${item.emailId}.json\n\nProcess this email: take the appropriate action based on the content and classification. After processing, mark it done by writing the current timestamp to ${ACTION_QUEUE_DIR}/${item.emailId}.json.done and deleting the .json file.`,
+    name: 'Email Triage',
+    sessionKey: `hook:email-triage:${item.emailId}`,
+    wakeMode: 'now',
+    deliver: true,
+    channel: oc.deliverChannel || 'last',
+    to: oc.deliverTo || undefined,
+    model: oc.model || 'iblai-router/auto',
+    timeoutSeconds: oc.timeoutSeconds || 90,
+  });
+
+  const mod = url.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const req = mod.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        'Authorization': `Bearer ${oc.token}`,
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          stats.webhookSuccess = (stats.webhookSuccess || 0) + 1;
+          console.log(`[triage] OpenClaw notified for ${item.emailId} (${res.statusCode})`);
+          resolve(data);
+        } else {
+          reject(new Error(`OpenClaw webhook ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end(payload);
+  });
 }
 
 // Mark a queue item as done (called by cleanup, prevents re-queue)
