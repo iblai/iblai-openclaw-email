@@ -215,7 +215,30 @@ function ensureQueueDir() {
 function enqueueAction(item) {
   ensureQueueDir();
   const file = path.join(ACTION_QUEUE_DIR, `${item.emailId}.json`);
+  // Don't re-queue if already queued or already processed (.done marker)
+  const doneFile = file + '.done';
+  if (fs.existsSync(file) || fs.existsSync(doneFile)) return;
   fs.writeFileSync(file, JSON.stringify(item, null, 2));
+}
+
+// Mark a queue item as done (called by cleanup, prevents re-queue)
+function markActionDone(emailId) {
+  const file = path.join(ACTION_QUEUE_DIR, `${emailId}.json`);
+  const doneFile = file + '.done';
+  try { fs.writeFileSync(doneFile, new Date().toISOString()); } catch {}
+  try { fs.unlinkSync(file); } catch {}
+}
+
+// Cleanup old .done markers (>24h)
+function cleanupDoneMarkers() {
+  try {
+    const files = fs.readdirSync(ACTION_QUEUE_DIR).filter(f => f.endsWith('.done'));
+    const cutoff = Date.now() - 86400000;
+    for (const f of files) {
+      const fp = path.join(ACTION_QUEUE_DIR, f);
+      if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+    }
+  } catch {}
 }
 
 function extractHeader(msg, name) {
@@ -505,6 +528,27 @@ async function triageCycle() {
         console.error(`[triage] Error processing message ${msg.id}:`, e.message);
         stats.errors++;
       }
+    }
+
+    // Auto-cleanup stale queue items (>5 min old = already processed or stuck)
+    try {
+      ensureQueueDir();
+      const queueFiles = fs.readdirSync(ACTION_QUEUE_DIR);
+      for (const f of queueFiles) {
+        const fp = path.join(ACTION_QUEUE_DIR, f);
+        if (f.endsWith('.done')) {
+          // Clean old done markers
+          if (Date.now() - fs.statSync(fp).mtimeMs > 86400000) fs.unlinkSync(fp);
+        } else if (f.endsWith('.json')) {
+          // Auto-delete queue files older than 5 minutes (cron should've processed by then)
+          if (Date.now() - fs.statSync(fp).mtimeMs > 300000) {
+            console.log(`[triage] AUTO-CLEANUP stale queue file: ${f}`);
+            markActionDone(f.replace('.json', ''));
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[triage] Queue cleanup error:', e.message);
     }
 
     // Update timestamp checkpoint after successful check (whether or not emails were found)
