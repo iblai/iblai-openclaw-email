@@ -5,10 +5,12 @@
     "checkIntervalSeconds": 60,
     "searchQuery": "is:unread",
     "whitelistedDomains": [
-      "yourcompany.com"
+      "ibl.ai",
+      "ibleducation.com"
     ],
     "whitelistedAddresses": []
   },
+  "shadowMode": false,
   "models": {
     "classifier": "claude-3-5-haiku-20241022",
     "action": "iblai-router/auto",
@@ -33,42 +35,96 @@
     "processedFile": "./processed-emails.json",
     "rules": [
       {
-        "name": "urgent-ops",
+        "name": "vip-miguel",
         "match": {
-          "from": "*@yourcompany.com",
+          "from": "miguel@ibl.ai"
+        },
+        "action": "escalate",
+        "assignTo": "engineering"
+      },
+      {
+        "name": "vip-miguel-edu",
+        "match": {
+          "from": "miguel@ibleducation.com"
+        },
+        "action": "escalate",
+        "assignTo": "engineering"
+      },
+      {
+        "name": "ops-alerts",
+        "match": {
+          "from": "ops@ibl.ai",
           "subjectContains": [
-            "DOWN",
-            "alert",
-            "critical",
-            "urgent"
+            "DOWN alert",
+            "UP alert",
+            "Pingdom"
           ]
         },
         "action": "escalate",
-        "assignTo": "ops-team",
-        "model": "claude-opus-4-6"
+        "assignTo": "ops-team"
       },
       {
-        "name": "noisy-alerts",
+        "name": "ops-skip",
         "match": {
-          "from": "alerts@yourcompany.com"
+          "from": "ops@ibl.ai"
         },
-        "action": "skip"
+        "action": "skip",
+        "comment": "Non-Pingdom ops emails (Sentry etc) — ignore per policy"
       },
       {
         "name": "bug-report",
         "match": {
-          "from": "*@yourcompany.com",
+          "from": "*@ibl.ai",
           "subjectContains": [
             "bug",
             "error",
             "broken",
             "500",
-            "404"
+            "404",
+            "Sentry",
+            "crash"
           ]
         },
         "action": "route",
-        "assignTo": "engineering",
-        "model": "claude-sonnet-4-6"
+        "assignTo": "engineering"
+      },
+      {
+        "name": "deployment",
+        "match": {
+          "from": "*@ibl.ai",
+          "subjectContains": [
+            "deploy",
+            "release",
+            "rollback",
+            "hotfix"
+          ]
+        },
+        "action": "escalate",
+        "assignTo": "ops-team"
+      },
+      {
+        "name": "support-ticket",
+        "match": {
+          "from": "support@ibleducation.com"
+        },
+        "action": "route",
+        "assignTo": "support"
+      },
+      {
+        "name": "status-email",
+        "match": {
+          "to": "status@ibleducation.com"
+        },
+        "action": "route",
+        "assignTo": "status"
+      },
+      {
+        "name": "client-email",
+        "match": {
+          "from": "*@ibleducation.com"
+        },
+        "action": "route",
+        "assignTo": "engineering"
       },
       {
         "name": "general",
@@ -81,10 +137,10 @@
     ],
     "teams": {
       "ops-team": {
-        "notify": "slack-channel-or-webhook"
+        "notify": "whatsapp:120363427627583416@g.us"
       },
       "engineering": {
-        "notify": "slack-channel-or-webhook"
+        "notify": "telegram:-5105973335"
       }
     }
   },
@@ -92,5 +148,13 @@
     "method": "from+subject+haiku",
     "ttlHours": 168
   },
-  "shadowMode": false
+  "openclaw": {
+    "enabled": false,
+    "hookUrl": "http://127.0.0.1:18789/hooks/agent",
+    "token": "b9e8660811f5ba6e08cf4706a51c2ffe044922c4615b050f",
+    "model": "iblai-router/auto",
+    "deliverChannel": "telegram",
+    "deliverTo": "telegram:8339148707",
+    "timeoutSeconds": 120
+  }
 }
