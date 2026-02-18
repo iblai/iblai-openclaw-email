@@ -268,6 +268,59 @@ what categories of email I get, what action each category should trigger,
 any VIP senders, and what teams/channels to notify. Then write the config.
 ```
 
+### Auto-Generate Rules from Email History
+
+If you've already been receiving emails for a while, your agent can analyze your recent inbox and generate rules automatically — no questions needed:
+
+> Analyze my last 200 emails and generate triage rules for me
+
+Your agent will:
+
+1. **Fetch recent emails** from Gmail (subject + sender only — no body content needed)
+2. **Cluster them** by sender domain, subject patterns, and frequency
+3. **Identify categories** (e.g., "you get ~30 Sentry alerts/day from ops@, ~5 deployment emails from engineers, ~10 client threads")
+4. **Propose rules** with match patterns, actions, and team assignments
+5. **Show you the rules for approval** before writing to `config.json`
+
+Example output:
+
+```
+Based on your last 200 emails, I found these patterns:
+
+  📊 ops@ibl.ai (47 emails)
+     Subjects: "DOWN alert: ...", "UP alert: ...", "Sentry: ..."
+     → Proposed rule: "ops-alerts" — escalate to ops-team
+
+  📊 *@ibl.ai engineers (38 emails)
+     Subjects: "Re: bug in ...", "PR #...", "deploy ..."
+     → Proposed rule: "engineering" — route to engineering team
+
+  📊 miguel@ibl.ai (29 emails)
+     Mixed subjects — forwarded alerts, task assignments, questions
+     → Proposed rule: "vip-miguel" — always escalate (VIP)
+
+  📊 *@ibleducation.com (18 emails)
+     Subjects: "Re: LTI setup", "Question about ..."
+     → Proposed rule: "client-support" — route to engineering
+
+  📊 noreply@github.com (68 emails)
+     Subjects: "[iblai/iblai-platform] ..."
+     → Proposed rule: "github-notifications" — skip (noise)
+
+  Write these rules to config.json? (I can adjust any of them first)
+```
+
+This works especially well when you're not sure what categories you need — let the data tell you.
+
+#### Prompt for Your Agent
+
+```
+Read the email triage SKILL.md at ~/.openclaw/workspace/email-triage/SKILL.md.
+Then fetch my last 200 emails from Gmail (subjects and senders only), cluster
+them by pattern, and propose triage rules. Show me the rules before writing
+them to config.json.
+```
+
 Or simply describe your setup in plain language:
 
 > I get ops alerts from Pingdom, bug reports from my team, and client emails.

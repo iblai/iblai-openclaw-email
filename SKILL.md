@@ -38,6 +38,20 @@ Then generate the `triage.rules` array and `triage.teams` object in `config.json
 
 If the user instead describes their setup in a single message (e.g., "I get Pingdom alerts and bug reports, alerts should go to the fires channel"), skip the interview and generate rules directly from their description.
 
+## Auto-Generate Rules from Email History
+
+When a user asks to generate rules from their email history (or says "analyze my emails and create rules"):
+
+1. Use the Gmail skill to fetch the last 200 emails (metadata only: From, Subject, Date)
+2. Cluster by sender domain and subject patterns
+3. Count frequency per cluster
+4. For each cluster, propose: rule name, match pattern (from + subjectContains), action (skip/classify/route/escalate), and suggested team
+5. Present the proposed rules to the user in a readable format with email counts and example subjects
+6. Ask for approval before writing to config.json
+7. Flag high-volume noise sources (e.g., GitHub notifications, automated alerts) and suggest "skip" rules for them to save on classification costs
+
+Key: only fetch metadata (From, Subject, Date headers) — don't read email bodies. This keeps the analysis fast and cheap.
+
 ## Requirements
 
 - Node.js ≥ 18
