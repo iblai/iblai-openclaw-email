@@ -26,8 +26,8 @@ Sub-agents default to [`iblai-router/auto`](https://github.com/iblai/iblai-openc
 **Install from your terminal:**
 
 ```bash
-git clone https://github.com/iblai/iblai-openclaw-email.git email-triage
-cd email-triage && bash scripts/install.sh
+git clone https://github.com/iblai/iblai-openclaw-email.git iblai-email-triage
+cd iblai-email-triage && bash scripts/install.sh
 ```
 
 **Or just ask your OpenClaw agent:**
@@ -480,8 +480,8 @@ Your agent will clone the repo, run the install script, and start the service.
 
 ```bash
 cd ~/.openclaw/workspace
-git clone https://github.com/iblai/iblai-openclaw-email.git email-triage
-bash email-triage/scripts/install.sh
+git clone https://github.com/iblai/iblai-openclaw-email.git iblai-email-triage
+bash iblai-email-triage/scripts/install.sh
 ```
 
 ### Option C: Manual setup
@@ -489,7 +489,7 @@ bash email-triage/scripts/install.sh
 ```bash
 # 1. Clone into your workspace
 cd ~/.openclaw/workspace
-git clone https://github.com/iblai/iblai-openclaw-email.git email-triage
+git clone https://github.com/iblai/iblai-openclaw-email.git iblai-email-triage
 
 # 2. Create the systemd service
 sudo tee /etc/systemd/system/iblai-email-triage.service > /dev/null << EOF
@@ -499,12 +499,12 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$(which node) $HOME/.openclaw/workspace/email-triage/server.js
-Environment=EMAIL_TRIAGE_CONFIG=$HOME/.openclaw/workspace/email-triage/config.json
+ExecStart=$(which node) $HOME/.openclaw/workspace/iblai-email-triage/server.js
+Environment=EMAIL_TRIAGE_CONFIG=$HOME/.openclaw/workspace/iblai-email-triage/config.json
 Environment=EMAIL_TRIAGE_PORT=8403
 Restart=always
 RestartSec=5
-WorkingDirectory=$HOME/.openclaw/workspace/email-triage
+WorkingDirectory=$HOME/.openclaw/workspace/iblai-email-triage
 
 [Install]
 WantedBy=multi-user.target
