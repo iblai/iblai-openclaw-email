@@ -5,6 +5,7 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { extractEmail: _extractEmail, extractHeader: _extractHeader, extractBody: _extractBody, isWhitelisted: _isWhitelisted, matchRule: _matchRule } = require('./lib');
 
 // ---------------------------------------------------------------------------
 // Config
@@ -177,31 +178,7 @@ async function getMessageFull(token, msgId) {
 }
 
 function extractBody(msg) {
-  if (!msg.payload) return '';
-  function decode(data) {
-    if (!data) return '';
-    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-  }
-  // Simple message
-  if (msg.payload.body && msg.payload.body.data) return decode(msg.payload.body.data);
-  // Multipart — prefer text/plain
-  const parts = msg.payload.parts || [];
-  for (const p of parts) {
-    if (p.mimeType === 'text/plain' && p.body && p.body.data) return decode(p.body.data);
-  }
-  // Fallback to text/html
-  for (const p of parts) {
-    if (p.mimeType === 'text/html' && p.body && p.body.data) return decode(p.body.data);
-  }
-  // Nested multipart
-  for (const p of parts) {
-    if (p.parts) {
-      for (const sp of p.parts) {
-        if (sp.mimeType === 'text/plain' && sp.body && sp.body.data) return decode(sp.body.data);
-      }
-    }
-  }
-  return '';
+  return _extractBody(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +280,11 @@ function cleanupDoneMarkers() {
 }
 
 function extractHeader(msg, name) {
-  const h = (msg.payload && msg.payload.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());
-  return h ? h.value : '';
+  return _extractHeader(msg, name);
 }
 
 function extractEmail(headerVal) {
-  const m = headerVal.match(/<([^>]+)>/);
-  return m ? m[1] : headerVal;
+  return _extractEmail(headerVal);
 }
 
 // ---------------------------------------------------------------------------
@@ -387,45 +362,14 @@ function markProcessed(emailId, summary) {
 // Whitelist check
 // ---------------------------------------------------------------------------
 function isWhitelisted(fromEmail) {
-  const domains = config.gmail.whitelistedDomains || [];
-  const addresses = config.gmail.whitelistedAddresses || [];
-  if (domains.length === 0 && addresses.length === 0) return true; // no whitelist = allow all
-  const email = extractEmail(fromEmail).toLowerCase();
-  if (addresses.some(a => a.toLowerCase() === email)) return true;
-  const domain = email.split('@')[1];
-  return domains.some(d => d.toLowerCase() === domain);
+  return _isWhitelisted(fromEmail, config);
 }
 
 // ---------------------------------------------------------------------------
 // Rule matching
 // ---------------------------------------------------------------------------
 function matchRule(from, subject, to) {
-  const fromEmail = extractEmail(from).toLowerCase();
-  const toEmail = to ? extractEmail(to).toLowerCase() : '';
-  for (const rule of (config.triage.rules || [])) {
-    const m = rule.match;
-    // Check from pattern
-    if (m.from && m.from !== '*') {
-      if (m.from.startsWith('*@')) {
-        const domain = m.from.slice(2).toLowerCase();
-        if (!fromEmail.endsWith('@' + domain)) continue;
-      } else if (m.from.toLowerCase() !== fromEmail) continue;
-    }
-    // Check to pattern
-    if (m.to) {
-      if (m.to.startsWith('*@')) {
-        const domain = m.to.slice(2).toLowerCase();
-        if (!toEmail.endsWith('@' + domain)) continue;
-      } else if (m.to.toLowerCase() !== toEmail) continue;
-    }
-    // Check subject keywords
-    if (m.subjectContains && m.subjectContains.length > 0) {
-      const subj = subject.toLowerCase();
-      if (!m.subjectContains.some(kw => subj.includes(kw.toLowerCase()))) continue;
-    }
-    return rule;
-  }
-  return null;
+  return _matchRule(from, subject, to, config.triage.rules);
 }
 
 // ---------------------------------------------------------------------------
