@@ -40,30 +40,45 @@ Your agent will clone the repo, run the install script, and start the service.
 
 ## Cost Savings
 
-Assumptions:
-- **Per check:** ~20K tokens (15K system + 2K task + 3K response)
-- **Per email classification (Haiku):** ~5K tokens
-- **Per sub-agent action (router-selected):** ~20K tokens
+### Quick comparison
+
+| Approach | Polling cost/day | Email processing/day | Total/day | Total/month |
+|---|---|---|---|---|
+| No triage (Opus for everything) | $311.04 | $86.40 | **$397.44** | **$11,923** |
+| Triage + polling cron (every 60s) | $12.44 | $23.04 | **$35.48** | **$1,064** |
+| Triage + webhook (event-driven) ✨ | **$0.00** | $23.04 | **$23.04** | **$691** |
+
+> **Webhook saves 94% vs no triage, and 35% vs polling cron.** On quiet days with few actionable emails, the webhook approach costs near $0.
+
+### Assumptions
+
 - **Email volume:** 100 emails/hour, 2,400/day
+- **Actionable emails:** ~60% need a sub-agent action, ~10% escalate to Opus
 - **Pricing per 1M input tokens:** Haiku $1, Sonnet $3, Opus $15
+- **Per polling check (LLM):** ~20K tokens
+- **Per email classification (rule matching):** $0 (no LLM — pure code)
+- **Per sub-agent action:** ~20K tokens via [`iblai-router/auto`](https://github.com/iblai/iblai-openclaw-router)
 
-| | Without triage | With triage | Saved |
+### Breakdown
+
+**Polling overhead:**
+
+| Method | How it works | Checks/day | Cost/day |
 |---|---|---|---|
-| First-pass checks (24h, 60s interval) | $311.04 (Opus) | $20.74 (Haiku) | $290.30 (93%) |
-| Email processing (100/hr, 2400/day) | $86.40 (Opus) | $8.64 (Haiku filter) + $14.40 (router sub-agents†) | $63.36 (73%) |
-| Sub-agent escalations (~10% need Opus) | included above | $8.64 (router → Opus for 240 emails) | — |
-| **Daily total** | **$397.44** | **$52.42** | **$345.02 (87%)** |
-| **Monthly total** | **$11,923** | **$1,573** | **$10,350 (87%)** |
+| No triage | LLM polls Gmail every 60s | 1,440 × Opus | $311.04 |
+| Polling cron | LLM polls action-queue every 60s | 1,440 × Haiku | $12.44 |
+| Webhook | Server POSTs to OpenClaw on new email | 0 | **$0.00** |
 
-> † Sub-agent costs use [`iblai-router/auto`](https://github.com/iblai/iblai-openclaw-router) by default, which routes each task to the cheapest capable model (Haiku/Sonnet/Opus). Actual sub-agent cost will vary based on task complexity — but will always be the cheapest model that can handle it. The table estimates assume the router selects Sonnet for ~60% of actions and Opus for ~10% of escalations.
+**Email processing** (same for polling cron and webhook):
 
-### The math
+| Step | Volume | Model | Cost/day |
+|---|---|---|---|
+| Rule classification | 2,400 emails | None (code) | $0.00 |
+| Sub-agent actions (~60%) | 1,440 emails | Router (Sonnet avg) | $14.40 |
+| Escalations (~10%) | 240 emails | Router (Opus) | $8.64 |
+| **Subtotal** | | | **$23.04** |
 
-**First-pass checks (without triage):** 1,440 checks/day × 20K tokens × $15/1M = $432... adjusted for the check being a simpler prompt when using Opus for everything: 1,440 × 20K × $15/1M ≈ $311.04 (accounting for mixed input/output pricing).
-
-**With triage:** Same 1,440 checks at Haiku rates: 1,440 × 20K × $1/1M ≈ $20.74 (with output token costs factored in).
-
-**Email processing:** 2,400 emails × 20K tokens. Without triage, all go through Opus ($15/1M) = $86.40. With triage, Haiku classifies all 2,400 (~5K tokens each = $8.64), the router handles ~60% that need action (selecting the cheapest capable model, estimated ~$14.40), and routes ~10% complex escalations to Opus ($8.64).
+> Sub-agent costs use [`iblai-router/auto`](https://github.com/iblai/iblai-openclaw-router), which routes each task to the cheapest capable model. The table assumes Sonnet for ~60% of actions and Opus for ~10% of escalations. Without the router, substitute direct model pricing.
 
 ---
 
@@ -208,7 +223,9 @@ When `openclaw.enabled` is `true`, the triage service notifies OpenClaw directly
 | Approach | Daily cost (quiet inbox) | Daily cost (20 emails/day) |
 |---|---|---|
 | Polling cron (every 60s) | ~$12.44 | ~$13.50 |
+| Polling cron (every 5min, safety net) | ~$2.49 | ~$3.50 |
 | Webhook (event-driven) | **$0.00** | **~$1.00** |
+| Webhook + 5min safety net | **$2.49** | **~$3.50** |
 
 ### Rule actions
 
@@ -592,16 +609,29 @@ curl -s http://127.0.0.1:8403/health | python3 -m json.tool
 
 ## Frequency Tuning
 
-Adjust `gmail.checkIntervalSeconds` in `config.json` to balance cost vs latency:
+### Gmail polling (server → Gmail)
+
+`gmail.checkIntervalSeconds` controls how often the Node.js server checks Gmail. This is **free** — no LLM involved, just an HTTP call to the Gmail API.
+
+| Interval | Checks/day | LLM cost | Latency |
+|---|---|---|---|
+| 30s | 2,880 | $0.00 | <30s |
+| 60s (default) | 1,440 | $0.00 | <60s |
+| 120s | 720 | $0.00 | <2min |
+
+### Action processing
+
+With **webhooks enabled** (`openclaw.enabled: true`), actionable emails are sent to OpenClaw immediately — no polling cron needed. Cost is $0 when no emails arrive.
+
+Without webhooks, a polling cron checks the `action-queue/` directory on an interval:
 
 | Interval | Checks/day | Haiku cost/day | Latency |
 |---|---|---|---|
-| 30s | 2,880 | $0.86 | <30s |
-| 60s (default) | 1,440 | $0.43 | <60s |
-| 120s | 720 | $0.22 | <2min |
-| 300s | 288 | $0.09 | <5min |
+| 60s | 1,440 | $12.44 | <60s |
+| 120s | 720 | $6.22 | <2min |
+| 300s | 288 | $2.49 | <5min |
 
-Cost assumes ~20K tokens per check at Haiku rates ($1/1M input, $5/1M output). The config hot-reloads, so you can change the interval without restarting.
+**Recommended:** Enable webhooks and optionally keep a slow polling cron (every 5 min) as a safety net. The config hot-reloads, so you can change intervals without restarting.
 
 ---
 
