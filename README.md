@@ -171,6 +171,113 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
 
 ---
 
+## Interactive Setup
+
+The fastest way to configure your triage rules is to let your OpenClaw agent interview you. Just say:
+
+> Set up email triage rules for me
+
+Your agent will ask a short series of questions to understand your email patterns, then generate a complete `config.json` tailored to your workflow. Here's what the conversation looks like:
+
+```
+Agent: I'll help you set up email triage. A few quick questions:
+
+  1. What email address should I monitor?
+     → anne@ibl.ai
+
+  2. What domains should I accept emails from? (comma-separated)
+     → ibl.ai, ibleducation.com
+
+  3. What kinds of emails do you typically receive? Describe 2-5 categories.
+     → Ops alerts from Pingdom (subject has UP/DOWN), bug reports from
+       engineers, feature requests from clients, deployment requests,
+       and general questions
+
+  4. For each category, what should happen?
+     → Ops alerts: post to our Fires WhatsApp group immediately
+     → Bug reports: create a GitHub issue and assign to engineering
+     → Feature requests: create a GitHub issue and tag as feature
+     → Deployment requests: assign to ops team, high priority
+     → General: just log it, I'll review manually
+
+  5. Are there any VIP senders whose emails should always be escalated?
+     → Yes — anything from miguel@ibl.ai or the CEO should use the
+       most capable model, no filtering
+
+  6. What teams do you have, and how should they be notified?
+     → Engineering team: WhatsApp group 120363...@g.us
+     → Ops team: WhatsApp group 120363...@g.us
+```
+
+From your answers, the agent generates rules like:
+
+```json
+{
+  "rules": [
+    {
+      "name": "vip-miguel",
+      "match": { "from": "miguel@ibl.ai" },
+      "action": "escalate",
+      "assignTo": "engineering",
+      "model": "iblai-router/auto"
+    },
+    {
+      "name": "ops-alerts",
+      "match": { "from": "*@ibl.ai", "subjectContains": ["DOWN", "UP", "alert", "Pingdom"] },
+      "action": "escalate",
+      "assignTo": "ops-team"
+    },
+    {
+      "name": "bug-reports",
+      "match": { "from": "*@ibl.ai", "subjectContains": ["bug", "error", "broken", "500", "404", "crash"] },
+      "action": "route",
+      "assignTo": "engineering"
+    },
+    {
+      "name": "feature-requests",
+      "match": { "from": "*", "subjectContains": ["feature", "request", "would be nice", "suggestion"] },
+      "action": "route",
+      "assignTo": "engineering"
+    },
+    {
+      "name": "deployments",
+      "match": { "from": "*@ibl.ai", "subjectContains": ["deploy", "release", "rollback", "hotfix"] },
+      "action": "escalate",
+      "assignTo": "ops-team"
+    },
+    {
+      "name": "general",
+      "match": { "from": "*" },
+      "action": "classify"
+    }
+  ]
+}
+```
+
+The agent writes this directly to `config.json` (hot-reloaded, no restart needed). You can always edit the rules manually afterward.
+
+### Prompt for Your Agent
+
+If you want to trigger this setup flow explicitly, paste this into your OpenClaw session:
+
+```
+Read the SKILL.md at ~/.openclaw/workspace/email-triage/SKILL.md, then ask me
+a few questions about my email patterns so you can generate triage rules for
+my config.json. Ask about: what email to monitor, which domains to accept,
+what categories of email I get, what action each category should trigger,
+any VIP senders, and what teams/channels to notify. Then write the config.
+```
+
+Or simply describe your setup in plain language:
+
+> I get ops alerts from Pingdom, bug reports from my team, and client emails.
+> Ops alerts should go to the fires channel, bugs should become GitHub issues
+> assigned to engineering, and client emails should be flagged for me to review.
+
+Your agent will translate that into rules and update `config.json`.
+
+---
+
 ## Email Log Format
 
 Every email gets logged to `email-triage.log` as JSONL (one JSON object per line):

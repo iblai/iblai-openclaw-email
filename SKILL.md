@@ -23,6 +23,21 @@ bash scripts/uninstall.sh
 
 Edit `config.json` to customize Gmail settings, models, triage rules, and polling frequency. The server hot-reloads on config changes.
 
+## Interactive Rule Setup
+
+When a user asks to set up email triage rules (or says "set up email triage rules for me"), walk them through these questions:
+
+1. **What email address should I monitor?** (e.g., `anne@ibl.ai`)
+2. **What domains should I accept emails from?** (comma-separated, e.g., `ibl.ai, ibleducation.com`)
+3. **What kinds of emails do you typically receive?** Ask them to describe 2-5 categories in plain language.
+4. **For each category, what should happen?** (create an issue, notify a channel, escalate, just log it)
+5. **Are there VIP senders whose emails should always get full attention?** (these get `action: "escalate"`)
+6. **What teams do you have, and how should they be notified?** (WhatsApp group JIDs, Slack channels, etc.)
+
+Then generate the `triage.rules` array and `triage.teams` object in `config.json` based on their answers. Write the config file directly — it hot-reloads, no restart needed.
+
+If the user instead describes their setup in a single message (e.g., "I get Pingdom alerts and bug reports, alerts should go to the fires channel"), skip the interview and generate rules directly from their description.
+
 ## Requirements
 
 - Node.js ≥ 18
