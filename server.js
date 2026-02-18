@@ -554,7 +554,7 @@ async function triageCycle() {
           if (Date.now() - fs.statSync(fp).mtimeMs > 86400000) fs.unlinkSync(fp);
         } else if (f.endsWith('.json')) {
           // Auto-delete queue files older than 5 minutes (cron should've processed by then)
-          if (Date.now() - fs.statSync(fp).mtimeMs > 300000) {
+          if (Date.now() - fs.statSync(fp).mtimeMs > 600000) {
             console.log(`[triage] AUTO-CLEANUP stale queue file: ${f}`);
             markActionDone(f.replace('.json', ''));
           }
