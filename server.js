@@ -561,12 +561,9 @@ server.listen(PORT, '127.0.0.1', () => {
   triageCycle();
   setInterval(triageCycle, (config.gmail.checkIntervalSeconds || 60) * 1000);
 
-  // systemd watchdog: notify every 60s if WatchdogSec is configured
-  // (requires sd_notify — simplified: touch a file that systemd can watch)
-  if (process.env.WATCHDOG_USEC) {
-    const watchdogMs = parseInt(process.env.WATCHDOG_USEC, 10) / 1000 / 2; // notify at half interval
-    setInterval(() => {
-      try { require('child_process').execSync('systemd-notify WATCHDOG=1', { stdio: 'ignore' }); } catch {}
-    }, watchdogMs);
-  }
+  // NOTE: systemd watchdog via child-process `systemd-notify` does NOT work
+  // with Type=simple — systemd rejects notifications from non-main PIDs,
+  // causing repeated watchdog kills. Removed in v1.5.0.
+  // If watchdog is needed, use the sd-notify npm package (native socket) or
+  // set Type=notify in the unit file with proper sd_notify bindings.
 });

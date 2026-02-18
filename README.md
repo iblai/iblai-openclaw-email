@@ -398,14 +398,9 @@ The processed-emails file stores every email's metadata (from, subject, classifi
 
 ### Watchdog & Self-Healing
 
-The service runs under systemd with `Restart=always` and `RestartSec=5`, so it automatically recovers from crashes. For deeper protection, enable the systemd watchdog:
+The service runs under systemd with `Restart=always` and `RestartSec=5`, so it automatically recovers from crashes.
 
-```ini
-# In iblai-email-triage.service
-WatchdogSec=120
-```
-
-With this enabled, systemd kills and restarts the process if it stops responding for more than 2 minutes — catching silent freezes that a simple crash restart wouldn't.
+> **Note:** Do not use `WatchdogSec` with the default `Type=simple` service. The `systemd-notify` command spawns a child process whose PID differs from the main PID, causing systemd to reject the notification and kill the service every watchdog interval. If you need watchdog support, use the `sd-notify` npm package for native socket notifications or switch to `Type=notify`.
 
 ### Action Queue & Delivery Guarantees
 
