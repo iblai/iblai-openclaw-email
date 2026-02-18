@@ -46,9 +46,8 @@ Your agent will clone the repo, run the install script, and start the service.
 |---|---|---|---|---|
 | No triage (Opus for everything) | $311.04 | $86.40 | **$397.44** | **$11,923** |
 | Triage + polling cron (every 60s) | $12.44 | $23.04 | **$35.48** | **$1,064** |
-| Triage + webhook (event-driven) ✨ | **$0.00** | $23.04 | **$23.04** | **$691** |
 
-> **Webhook saves 94% vs no triage, and 35% vs polling cron.** On quiet days with few actionable emails, the webhook approach costs near $0.
+> **91% savings vs no triage.** Gmail polling is free (Node.js HTTP, no LLM). The only LLM cost is the cron checking the action queue + sub-agents processing actionable emails.
 
 ### Assumptions
 
@@ -66,10 +65,9 @@ Your agent will clone the repo, run the install script, and start the service.
 | Method | How it works | Checks/day | Cost/day |
 |---|---|---|---|
 | No triage | LLM polls Gmail every 60s | 1,440 × Opus | $311.04 |
-| Polling cron | LLM polls action-queue every 60s | 1,440 × Haiku | $12.44 |
-| Webhook | Server POSTs to OpenClaw on new email | 0 | **$0.00** |
+| Triage server + cron | LLM polls action-queue every 60s | 1,440 × Haiku | $12.44 |
 
-**Email processing** (same for polling cron and webhook):
+**Email processing:**
 
 | Step | Volume | Model | Cost/day |
 |---|---|---|---|
@@ -182,51 +180,6 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
 | `models.action` | Model for routing actions (sub-agents) | `iblai-router/auto` |
 | `models.escalation` | Model for complex triage (sub-agents) | `iblai-router/auto` |
 | `dedup.ttlHours` | How long to remember processed emails | `168` (7 days) |
-| `openclaw.enabled` | Enable webhook notifications to OpenClaw | `false` |
-| `openclaw.hookUrl` | OpenClaw webhook endpoint | `http://127.0.0.1:18789/hooks/agent` |
-| `openclaw.token` | Webhook auth token (from `hooks.token` in openclaw.json) | — |
-| `openclaw.model` | Model for processing actionable emails | `iblai-router/auto` |
-| `openclaw.deliverChannel` | Channel for delivery (`telegram`, `slack`, etc.) | `last` |
-| `openclaw.deliverTo` | Delivery target (chat ID, phone number, etc.) | — |
-| `openclaw.timeoutSeconds` | Agent run timeout | `90` |
-
-### OpenClaw Webhook Integration (v1.2.0+)
-
-When `openclaw.enabled` is `true`, the triage service notifies OpenClaw directly via webhook whenever an actionable email (route/escalate) is queued. This is **event-driven** — no polling cron needed.
-
-**How it works:**
-1. Email arrives → triage service classifies it → writes to `action-queue/`
-2. Immediately sends `POST /hooks/agent` to OpenClaw with the email content
-3. OpenClaw spawns an isolated agent that processes the email and delivers to the configured channel
-4. No LLM cost when there are no actionable emails (zero polling overhead)
-
-**Setup:**
-1. Enable webhooks in your `openclaw.json`:
-   ```json
-   { "hooks": { "enabled": true, "token": "your-secret-token" } }
-   ```
-2. Add the `openclaw` block to your `config.json`:
-   ```json
-   {
-     "openclaw": {
-       "enabled": true,
-       "hookUrl": "http://127.0.0.1:18789/hooks/agent",
-       "token": "your-secret-token",
-       "model": "iblai-router/auto",
-       "deliverChannel": "telegram",
-       "deliverTo": "telegram:123456789"
-     }
-   }
-   ```
-
-**Cost comparison vs polling cron:**
-| Approach | Daily cost (quiet inbox) | Daily cost (20 emails/day) |
-|---|---|---|
-| Polling cron (every 60s) | ~$12.44 | ~$13.50 |
-| Polling cron (every 5min, safety net) | ~$2.49 | ~$3.50 |
-| Webhook (event-driven) | **$0.00** | **~$1.00** |
-| Webhook + 5min safety net | **$2.49** | **~$3.50** |
-
 ### Rule actions
 
 | Action | Behavior |
@@ -621,17 +574,15 @@ curl -s http://127.0.0.1:8403/health | python3 -m json.tool
 
 ### Action processing
 
-With **webhooks enabled** (`openclaw.enabled: true`), actionable emails are sent to OpenClaw immediately — no polling cron needed. Cost is $0 when no emails arrive.
-
-Without webhooks, a polling cron checks the `action-queue/` directory on an interval:
+An OpenClaw cron job polls the `action-queue/` directory for pending items:
 
 | Interval | Checks/day | Haiku cost/day | Latency |
 |---|---|---|---|
-| 60s | 1,440 | $12.44 | <60s |
+| 60s (recommended) | 1,440 | $12.44 | <60s |
 | 120s | 720 | $6.22 | <2min |
 | 300s | 288 | $2.49 | <5min |
 
-**Recommended:** Enable webhooks and optionally keep a slow polling cron (every 5 min) as a safety net. The config hot-reloads, so you can change intervals without restarting.
+The config hot-reloads, so you can change intervals without restarting.
 
 ---
 

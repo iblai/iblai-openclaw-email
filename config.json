@@ -92,14 +92,5 @@
     "method": "from+subject+haiku",
     "ttlHours": 168
   },
-  "shadowMode": false,
-  "openclaw": {
-    "enabled": false,
-    "hookUrl": "http://127.0.0.1:18789/hooks/agent",
-    "token": "your-openclaw-hooks-token",
-    "model": "iblai-router/auto",
-    "deliverChannel": "last",
-    "deliverTo": "",
-    "timeoutSeconds": 90
-  }
+  "shadowMode": false
 }
