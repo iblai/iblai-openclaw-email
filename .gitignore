@@ -1,0 +1,5 @@
+node_modules/
+*.log
+processed-emails.json
+token.json
+credentials.json
