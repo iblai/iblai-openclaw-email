@@ -192,9 +192,10 @@ function ensureQueueDir() {
 function enqueueAction(item) {
   ensureQueueDir();
   const file = path.join(ACTION_QUEUE_DIR, `${item.emailId}.json`);
-  // Don't re-queue if already queued or already processed (.done marker)
+  // Don't re-queue if already queued, being processed, or already done
   const doneFile = file + '.done';
-  if (fs.existsSync(file) || fs.existsSync(doneFile)) return;
+  const processingFile = file + '.processing';
+  if (fs.existsSync(file) || fs.existsSync(doneFile) || fs.existsSync(processingFile)) return;
   fs.writeFileSync(file, JSON.stringify(item, null, 2));
 }
 
@@ -491,8 +492,17 @@ async function triageCycle() {
         if (f.endsWith('.done')) {
           // Clean old done markers
           if (Date.now() - fs.statSync(fp).mtimeMs > 86400000) fs.unlinkSync(fp);
+        } else if (f.endsWith('.processing')) {
+          // Processing files older than 10 min are stuck — mark done to prevent infinite retry
+          if (Date.now() - fs.statSync(fp).mtimeMs > 600000) {
+            console.log(`[triage] AUTO-CLEANUP stuck processing file: ${f}`);
+            const emailId = f.replace('.json.processing', '');
+            markActionDone(emailId);
+            try { fs.unlinkSync(fp); } catch {}
+          }
         } else if (f.endsWith('.json')) {
-          // Auto-delete queue files older than 5 minutes (cron should've processed by then)
+          // Queue files older than 10 min without a .processing or .done companion are stuck
+          // Mark as done to prevent infinite consumer retries
           if (Date.now() - fs.statSync(fp).mtimeMs > 600000) {
             console.log(`[triage] AUTO-CLEANUP stale queue file: ${f}`);
             markActionDone(f.replace('.json', ''));

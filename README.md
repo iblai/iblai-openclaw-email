@@ -406,13 +406,19 @@ The service runs under systemd with `Restart=always` and `RestartSec=5`, so it a
 
 When a rule matches with `route` or `escalate`, the server fetches the full email body and writes a JSON file to the `action-queue/` directory. An OpenClaw cron job polls this directory and processes each file (creating GitHub issues, sending notifications, etc.).
 
-To prevent duplicate deliveries if the cron times out before deleting the queue file:
+To prevent duplicate deliveries, the queue uses a three-state lifecycle:
 
-- **`.done` markers** — After queuing an email, the server writes a `.done` marker file. It won't re-queue the same email even if the queue file is still present.
-- **5-minute auto-cleanup** — Queue files older than 5 minutes are automatically removed by the server (the cron runs every 60s, so 5 min means it's either been processed or is stuck).
-- **Dedup at queue level** — `enqueueAction()` checks for existing queue files and `.done` markers before writing.
+1. **`.json`** — Pending. Consumer (cron/webhook) should pick this up.
+2. **`.json.processing`** — Claimed. Consumer renames to this **before** doing any work. Prevents other consumers or retries from picking up the same item.
+3. **`.json.done`** — Completed. Server won't re-queue emails that have a `.done` marker.
 
-This means even if the cron fails to delete a file, the alert is sent exactly once.
+**Consumer contract:** Always rename `.json` → `.json.processing` before processing. After processing (success or failure), rename to `.json.done`. Never leave a `.json` file in place while working on it — that causes duplicate sends on retry.
+
+**Auto-cleanup safety nets:**
+- **`.processing` files > 10 min** — assumed stuck, auto-marked as `.done` to prevent infinite retries
+- **`.json` files > 10 min** — assumed orphaned, auto-marked as `.done`
+- **`.done` files > 24h** — cleaned up to prevent directory bloat
+- **Dedup at queue level** — `enqueueAction()` checks for `.json`, `.processing`, and `.done` before writing
 
 ### OAuth2 Token Resilience
 
