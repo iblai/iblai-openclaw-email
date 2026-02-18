@@ -6,3 +6,8 @@ credentials.json
 .last-check-ts
 .last-check-ts.tmp
 processed-emails.json.tmp
+config.json.bak
+processed-emails*.json
+email-triage.log
+action-queue/
+.last-check-ts

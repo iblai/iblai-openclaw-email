@@ -167,6 +167,48 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
 | `models.action` | Model for routing actions (sub-agents) | `iblai-router/auto` |
 | `models.escalation` | Model for complex triage (sub-agents) | `iblai-router/auto` |
 | `dedup.ttlHours` | How long to remember processed emails | `168` (7 days) |
+| `openclaw.enabled` | Enable webhook notifications to OpenClaw | `false` |
+| `openclaw.hookUrl` | OpenClaw webhook endpoint | `http://127.0.0.1:18789/hooks/agent` |
+| `openclaw.token` | Webhook auth token (from `hooks.token` in openclaw.json) | — |
+| `openclaw.model` | Model for processing actionable emails | `iblai-router/auto` |
+| `openclaw.deliverChannel` | Channel for delivery (`telegram`, `slack`, etc.) | `last` |
+| `openclaw.deliverTo` | Delivery target (chat ID, phone number, etc.) | — |
+| `openclaw.timeoutSeconds` | Agent run timeout | `90` |
+
+### OpenClaw Webhook Integration (v1.2.0+)
+
+When `openclaw.enabled` is `true`, the triage service notifies OpenClaw directly via webhook whenever an actionable email (route/escalate) is queued. This is **event-driven** — no polling cron needed.
+
+**How it works:**
+1. Email arrives → triage service classifies it → writes to `action-queue/`
+2. Immediately sends `POST /hooks/agent` to OpenClaw with the email content
+3. OpenClaw spawns an isolated agent that processes the email and delivers to the configured channel
+4. No LLM cost when there are no actionable emails (zero polling overhead)
+
+**Setup:**
+1. Enable webhooks in your `openclaw.json`:
+   ```json
+   { "hooks": { "enabled": true, "token": "your-secret-token" } }
+   ```
+2. Add the `openclaw` block to your `config.json`:
+   ```json
+   {
+     "openclaw": {
+       "enabled": true,
+       "hookUrl": "http://127.0.0.1:18789/hooks/agent",
+       "token": "your-secret-token",
+       "model": "iblai-router/auto",
+       "deliverChannel": "telegram",
+       "deliverTo": "telegram:123456789"
+     }
+   }
+   ```
+
+**Cost comparison vs polling cron:**
+| Approach | Daily cost (quiet inbox) | Daily cost (20 emails/day) |
+|---|---|---|
+| Polling cron (every 60s) | ~$12.44 | ~$13.50 |
+| Webhook (event-driven) | **$0.00** | **~$1.00** |
 
 ### Rule actions
 
