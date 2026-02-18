@@ -23,9 +23,23 @@ bash scripts/uninstall.sh
 
 Edit `config.json` to customize Gmail settings, models, triage rules, and polling frequency. The server hot-reloads on config changes.
 
-## Interactive Rule Setup
+## Rule Setup (Default: Auto-Generate from History)
 
-When a user asks to set up email triage rules (or says "set up email triage rules for me"), walk them through these questions:
+When a user asks to set up email triage (or says "set up email triage for me"), the **default** approach is to analyze their email history:
+
+1. Fetch the last 200 emails from Gmail (metadata only: From, Subject, Date)
+2. Cluster by sender domain and subject patterns
+3. Count frequency per cluster
+4. For each cluster, propose: rule name, match pattern (from + subjectContains), action (skip/classify/route/escalate), and suggested team
+5. Present the proposed rules to the user in a readable format with email counts and example subjects
+6. Ask for approval before writing to config.json
+7. Flag high-volume noise sources (e.g., GitHub notifications, automated alerts) and suggest "skip" rules to save on classification costs
+
+Key: only fetch metadata (From, Subject, Date headers) — don't read email bodies. This keeps the analysis fast and cheap.
+
+## Interview Mode (Alternative)
+
+If the user explicitly asks for an interview, has no email history, or says "interview me about my email patterns", walk them through these questions:
 
 1. **What email address should I monitor?** (e.g., `anne@ibl.ai`)
 2. **What domains should I accept emails from?** (comma-separated, e.g., `ibl.ai, ibleducation.com`)
@@ -37,20 +51,6 @@ When a user asks to set up email triage rules (or says "set up email triage rule
 Then generate the `triage.rules` array and `triage.teams` object in `config.json` based on their answers. Write the config file directly — it hot-reloads, no restart needed.
 
 If the user instead describes their setup in a single message (e.g., "I get Pingdom alerts and bug reports, alerts should go to the fires channel"), skip the interview and generate rules directly from their description.
-
-## Auto-Generate Rules from Email History
-
-When a user asks to generate rules from their email history (or says "analyze my emails and create rules"):
-
-1. Use the Gmail skill to fetch the last 200 emails (metadata only: From, Subject, Date)
-2. Cluster by sender domain and subject patterns
-3. Count frequency per cluster
-4. For each cluster, propose: rule name, match pattern (from + subjectContains), action (skip/classify/route/escalate), and suggested team
-5. Present the proposed rules to the user in a readable format with email counts and example subjects
-6. Ask for approval before writing to config.json
-7. Flag high-volume noise sources (e.g., GitHub notifications, automated alerts) and suggest "skip" rules for them to save on classification costs
-
-Key: only fetch metadata (From, Subject, Date headers) — don't read email bodies. This keeps the analysis fast and cheap.
 
 ## Requirements
 
