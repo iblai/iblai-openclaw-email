@@ -125,6 +125,11 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
         "model": "claude-opus-4-6"
       },
       {
+        "name": "noisy-alerts",
+        "match": { "from": "alerts@yourcompany.com" },
+        "action": "skip"
+      },
+      {
         "name": "bug-report",
         "match": { "from": "*@yourcompany.com", "subjectContains": ["bug", "error", "broken", "500", "404"] },
         "action": "route",
@@ -162,6 +167,17 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
 | `models.action` | Model for routing actions (sub-agents) | `iblai-router/auto` |
 | `models.escalation` | Model for complex triage (sub-agents) | `iblai-router/auto` |
 | `dedup.ttlHours` | How long to remember processed emails | `168` (7 days) |
+
+### Rule actions
+
+| Action | Behavior |
+|---|---|
+| `skip` | Silently drop the email — mark as processed, no LLM call, no queue. Use for known noise (Sentry, automated notifications, etc.) |
+| `classify` | Send to the classifier model for categorization. Default fallback for unmatched emails |
+| `route` | Queue for action by a sub-agent (issue creation, team notification). Uses `models.action` |
+| `escalate` | Queue for high-priority action. Uses `models.escalation` for the sub-agent |
+
+Rules are evaluated **top-to-bottom** — first match wins. Place specific rules (exact sender) above broad ones (wildcard domain), and `skip` rules before `route`/`escalate` rules for the same sender to filter out noise before it triggers actions.
 
 > **Note on `iblai-router/auto`:** The default `action` and `escalation` models use the [iblai-router](https://github.com/iblai/iblai-openclaw-router), which automatically picks the cheapest Claude model capable of handling each sub-agent task. If you don't have the router installed, set these to direct model IDs instead:
 > ```json
@@ -294,7 +310,7 @@ Every email gets logged to `email-triage.log` as JSONL (one JSON object per line
 |---|---|
 | `emailId` | Gmail message ID |
 | `classification` | Matched rule name |
-| `action` | `classify`, `route`, or `escalate` |
+| `action` | `skip`, `classify`, `route`, or `escalate` |
 | `assignedTo` | Team name from rule |
 | `escalated` | Whether this was sent to the expensive model |
 | `tokenCost` | Estimated cost in USD |
@@ -378,6 +394,18 @@ WatchdogSec=120
 ```
 
 With this enabled, systemd kills and restarts the process if it stops responding for more than 2 minutes — catching silent freezes that a simple crash restart wouldn't.
+
+### Action Queue & Delivery Guarantees
+
+When a rule matches with `route` or `escalate`, the server fetches the full email body and writes a JSON file to the `action-queue/` directory. An OpenClaw cron job polls this directory and processes each file (creating GitHub issues, sending notifications, etc.).
+
+To prevent duplicate deliveries if the cron times out before deleting the queue file:
+
+- **`.done` markers** — After queuing an email, the server writes a `.done` marker file. It won't re-queue the same email even if the queue file is still present.
+- **5-minute auto-cleanup** — Queue files older than 5 minutes are automatically removed by the server (the cron runs every 60s, so 5 min means it's either been processed or is stuck).
+- **Dedup at queue level** — `enqueueAction()` checks for existing queue files and `.done` markers before writing.
+
+This means even if the cron fails to delete a file, the alert is sent exactly once.
 
 ### OAuth2 Token Resilience
 

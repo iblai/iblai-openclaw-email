@@ -48,6 +48,13 @@
         "model": "claude-opus-4-6"
       },
       {
+        "name": "noisy-alerts",
+        "match": {
+          "from": "alerts@yourcompany.com"
+        },
+        "action": "skip"
+      },
+      {
         "name": "bug-report",
         "match": {
           "from": "*@yourcompany.com",
