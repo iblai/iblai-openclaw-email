@@ -49,6 +49,7 @@ Environment=EMAIL_TRIAGE_CONFIG=${PROJECT_DIR}/config.json
 Environment=EMAIL_TRIAGE_PORT=8403
 Restart=always
 RestartSec=5
+WatchdogSec=120
 WorkingDirectory=${PROJECT_DIR}
 
 [Install]

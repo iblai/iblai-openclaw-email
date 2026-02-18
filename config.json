@@ -4,7 +4,10 @@
     "credentialsPath": "~/.openclaw/workspace/skills/google-calendar/credentials.json",
     "checkIntervalSeconds": 60,
     "searchQuery": "is:unread",
-    "whitelistedDomains": ["ibl.ai", "ibleducation.com"],
+    "whitelistedDomains": [
+      "ibl.ai",
+      "ibleducation.com"
+    ],
     "whitelistedAddresses": []
   },
   "models": {
@@ -13,9 +16,18 @@
     "escalation": "iblai-router/auto"
   },
   "costs": {
-    "claude-3-5-haiku-20241022": { "input": 1.0, "output": 5.0 },
-    "claude-sonnet-4-6": { "input": 3.0, "output": 15.0 },
-    "claude-opus-4-6": { "input": 15.0, "output": 75.0 }
+    "claude-3-5-haiku-20241022": {
+      "input": 1.0,
+      "output": 5.0
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0
+    },
+    "claude-opus-4-6": {
+      "input": 15.0,
+      "output": 75.0
+    }
   },
   "triage": {
     "logFile": "./email-triage.log",
@@ -23,32 +35,56 @@
     "rules": [
       {
         "name": "urgent-ops",
-        "match": { "from": "*@ibl.ai", "subjectContains": ["DOWN", "alert", "critical", "urgent"] },
+        "match": {
+          "from": "*@ibl.ai",
+          "subjectContains": [
+            "DOWN",
+            "alert",
+            "critical",
+            "urgent"
+          ]
+        },
         "action": "escalate",
         "assignTo": "ops-team",
         "model": "claude-opus-4-6"
       },
       {
         "name": "bug-report",
-        "match": { "from": "*@ibl.ai", "subjectContains": ["bug", "error", "broken", "500", "404"] },
+        "match": {
+          "from": "*@ibl.ai",
+          "subjectContains": [
+            "bug",
+            "error",
+            "broken",
+            "500",
+            "404"
+          ]
+        },
         "action": "route",
         "assignTo": "engineering",
         "model": "claude-sonnet-4-6"
       },
       {
         "name": "general",
-        "match": { "from": "*" },
+        "match": {
+          "from": "*"
+        },
         "action": "classify",
         "model": "claude-3-5-haiku-20241022"
       }
     ],
     "teams": {
-      "ops-team": { "notify": "whatsapp-group-or-channel" },
-      "engineering": { "notify": "whatsapp-group-or-channel" }
+      "ops-team": {
+        "notify": "whatsapp-group-or-channel"
+      },
+      "engineering": {
+        "notify": "whatsapp-group-or-channel"
+      }
     }
   },
   "dedup": {
     "method": "from+subject+haiku",
     "ttlHours": 168
-  }
+  },
+  "shadowMode": false
 }

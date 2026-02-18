@@ -98,9 +98,17 @@ function refreshAccessToken() {
 async function getAccessToken() {
   if (!tokenData) loadToken();
   if (tokenData.expiry_date && Date.now() < tokenData.expiry_date - 60000) {
+    stats.tokenError = null;
     return tokenData.access_token;
   }
-  return refreshAccessToken();
+  try {
+    const token = await refreshAccessToken();
+    stats.tokenError = null;
+    return token;
+  } catch (e) {
+    stats.tokenError = e.message;
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +203,34 @@ function saveProcessed(processed) {
   const tmp = target + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(processed, null, 2));
   fs.renameSync(tmp, target);
+}
+
+// Daily backup of processed-emails file
+let lastBackupDate = null;
+function maybeBackupProcessed() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastBackupDate === today) return;
+  try {
+    const target = getProcessedPath();
+    const backup = target.replace('.json', '.backup.json');
+    if (fs.existsSync(target)) {
+      fs.copyFileSync(target, backup);
+      lastBackupDate = today;
+      console.log('[triage] Daily backup written:', backup);
+    }
+  } catch (e) {
+    console.error('[triage] Backup failed:', e.message);
+  }
+}
+
+// On startup: restore from backup if primary is missing
+function restoreFromBackupIfNeeded() {
+  const target = getProcessedPath();
+  const backup = target.replace('.json', '.backup.json');
+  if (!fs.existsSync(target) && fs.existsSync(backup)) {
+    fs.copyFileSync(backup, target);
+    console.log('[triage] Restored processed-emails from backup');
+  }
 }
 
 function isProcessed(emailId) {
@@ -295,6 +331,8 @@ const stats = {
   errors: 0,
   lastCheck: null,
   lastEmailAt: null,
+  tokenError: null,
+  shadowMode: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -306,6 +344,12 @@ async function triageCycle() {
   if (polling) return;
   polling = true;
   try {
+    const shadowMode = config.shadowMode === true;
+    stats.shadowMode = shadowMode;
+
+    // Daily backup of dedup file
+    maybeBackupProcessed();
+
     const token = await getAccessToken();
     const messages = await listUnreadMessages(token);
     stats.lastCheck = new Date().toISOString();
@@ -368,7 +412,15 @@ async function triageCycle() {
         else if (action === 'route') stats.totalRouted++;
         else stats.totalClassified++;
 
-        console.log(`[triage] ${action.toUpperCase()} | ${entry.from} | ${subject.slice(0, 60)} | rule=${entry.classification}`);
+        const modeTag = shadowMode ? ' [SHADOW]' : '';
+        console.log(`[triage]${modeTag} ${action.toUpperCase()} | ${entry.from} | ${subject.slice(0, 60)} | rule=${entry.classification}`);
+
+        // In shadow mode: log only, don't take action
+        if (shadowMode) continue;
+
+        // TODO: In non-shadow mode, trigger sub-agent actions here
+        // - For 'route': spawn sub-agent to create issue + notify engineer
+        // - For 'escalate': spawn sub-agent with escalation model
       } catch (e) {
         console.error(`[triage] Error processing message ${msg.id}:`, e.message);
         stats.errors++;
@@ -396,8 +448,19 @@ const PORT = parseInt(process.env.EMAIL_TRIAGE_PORT || '8403', 10);
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', uptime: process.uptime(), lastCheck: stats.lastCheck }));
+    const health = {
+      status: stats.tokenError ? 'error' : 'ok',
+      uptime: Math.floor(process.uptime()),
+      lastCheck: stats.lastCheck,
+      shadowMode: stats.shadowMode,
+    };
+    if (stats.tokenError) {
+      health.error = 'token_refresh_failed';
+      health.message = 'Re-authorize Gmail access';
+      health.detail = stats.tokenError;
+    }
+    res.writeHead(stats.tokenError ? 503 : 200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(health));
     return;
   }
   if (req.method === 'GET' && req.url === '/stats') {
@@ -410,11 +473,24 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[triage] Email triage server listening on http://127.0.0.1:${PORT}`);
+  // Restore dedup file from backup if needed
+  restoreFromBackupIfNeeded();
+
+  const shadowTag = config.shadowMode ? ' [SHADOW MODE]' : '';
+  console.log(`[triage]${shadowTag} Email triage server listening on http://127.0.0.1:${PORT}`);
   console.log(`[triage] Polling Gmail every ${config.gmail.checkIntervalSeconds}s`);
   console.log(`[triage] Config: ${CONFIG_PATH}`);
 
   // Start polling
   triageCycle();
   setInterval(triageCycle, (config.gmail.checkIntervalSeconds || 60) * 1000);
+
+  // systemd watchdog: notify every 60s if WatchdogSec is configured
+  // (requires sd_notify — simplified: touch a file that systemd can watch)
+  if (process.env.WATCHDOG_USEC) {
+    const watchdogMs = parseInt(process.env.WATCHDOG_USEC, 10) / 1000 / 2; // notify at half interval
+    setInterval(() => {
+      try { require('child_process').execSync('systemd-notify WATCHDOG=1', { stdio: 'ignore' }); } catch {}
+    }, watchdogMs);
+  }
 });

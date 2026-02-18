@@ -257,6 +257,68 @@ The processed-emails file stores every email's metadata (from, subject, classifi
 | No false suppression | Scoped verification, no unrelated gates |
 | Catches duplicate forwards | Full metadata history + subject similarity |
 
+### Watchdog & Self-Healing
+
+The service runs under systemd with `Restart=always` and `RestartSec=5`, so it automatically recovers from crashes. For deeper protection, enable the systemd watchdog:
+
+```ini
+# In iblai-email-triage.service
+WatchdogSec=120
+```
+
+With this enabled, systemd kills and restarts the process if it stops responding for more than 2 minutes — catching silent freezes that a simple crash restart wouldn't.
+
+### OAuth2 Token Resilience
+
+OAuth2 access tokens expire hourly. The service auto-refreshes them before each Gmail poll. If the refresh token itself is revoked (password change, admin action), the service logs a clear error and exposes it via the `/health` endpoint:
+
+```json
+{"status": "error", "error": "token_refresh_failed", "message": "Re-authorize Gmail access"}
+```
+
+Monitor `/health` from your existing infrastructure to catch this early.
+
+### Dedup File Protection
+
+The processed-emails file is the single source of truth for what's been handled. To guard against accidental deletion:
+
+- The service writes a daily backup to `processed-emails.backup.json`
+- On startup, if the primary file is missing but the backup exists, it auto-restores from backup
+- The atomic write pattern (tmp + rename) prevents corruption, but the backup catches the rare case of manual deletion
+
+### Shadow Mode
+
+Before going live, run the triage server alongside your existing setup in shadow mode. In shadow mode, the server polls, classifies, and logs — but doesn't take action (no sub-agents, no notifications). Compare the logs against your existing pipeline to verify:
+
+- Every email was seen
+- Classifications match expectations
+- Dedup caught all duplicates
+
+Enable shadow mode in `config.json`:
+
+```json
+{
+  "shadowMode": true
+}
+```
+
+When satisfied, set `shadowMode: false` and the server begins taking action.
+
+### Fallback Monitoring
+
+For belt-and-suspenders reliability, pair the triage server with a lightweight OpenClaw cron job that monitors the checkpoint file:
+
+```
+Every 10 minutes: read .last-check-ts — if it's more than 5 minutes stale,
+alert that the triage server may be down and optionally run a direct Gmail check.
+```
+
+This way, if the server dies and systemd can't restart it (disk full, OOM, etc.), you get alerted within 10 minutes and a fallback kicks in.
+
+### Gmail API Limits
+
+Gmail API allows 250 quota units/second for Workspace users. A message list call costs 5 units; a message get costs 5 units. At 60-second polling with up to 50 messages per cycle, peak usage is well under 1% of the quota. The service logs and retries on 429 (rate limit) responses with exponential backoff.
+
 ---
 
 ## Gmail Setup Prerequisites
