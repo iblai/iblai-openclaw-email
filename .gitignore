@@ -3,3 +3,6 @@ node_modules/
 processed-emails.json
 token.json
 credentials.json
+.last-check-ts
+.last-check-ts.tmp
+processed-emails.json.tmp

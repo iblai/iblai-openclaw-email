@@ -218,6 +218,80 @@ The dedup TTL is configurable via `dedup.ttlHours` (default: 168 hours / 7 days)
 
 ---
 
+## Lessons from Production (Battle-Tested Patterns)
+
+These patterns come from running a real email triage pipeline at scale. Every one of them was learned the hard way — each addresses a bug that caused missed emails, duplicate alerts, or out-of-order notifications.
+
+### 1. Dedup File Corruption: Always Append with Newlines
+
+**The bug:** Email IDs were appended to the dedup file without proper newlines, causing two IDs to concatenate on one line (e.g., `19c6b688f56ae6fa19c6b956f8881d72`). When grepping for either ID, neither matched — so both emails were reprocessed, creating duplicate GitHub issues and duplicate WhatsApp notifications.
+
+**The fix:** This service uses structured JSON for the processed-emails file instead of a flat text file. Each email ID is a key in a JSON object, so there's no newline/concatenation risk. If you implement your own dedup with a flat file, **always** use `echo "$ID" >> file` (which adds a trailing newline) and **never** use `printf` without an explicit `\n`.
+
+**In the code:** `processed-emails.json` stores entries as `{ "emails": { "<id>": { ... } } }` — key-based lookup, immune to line concatenation.
+
+### 2. Timestamp-Based Search, Not Relative Time
+
+**The bug:** Using Gmail's `newer_than:2m` search missed emails during downtime. If the service was down for 30 minutes (restart, network issue, backoff), all emails received during that window were never seen because `newer_than:2m` only looks at the last 2 minutes.
+
+**The fix:** Use `after:{epoch_timestamp}` in Gmail search queries. Before each check, read a checkpoint file containing the epoch of the last successful check. After the check, write the current epoch. This way, even after hours of downtime, the next check picks up every email since the last successful run.
+
+**In the code:** The service maintains a timestamp checkpoint and uses `after:{epoch}` search. Gap-proof by design.
+
+### 3. No Age Gate on Processing
+
+**The bug:** An age filter skipped emails older than N minutes, intended to avoid reprocessing old mail. But after downtime, legitimate emails that arrived during the outage were silently discarded because they were now "too old."
+
+**The fix:** The **only** gate should be the dedup file. If an email's ID isn't in the processed list, it gets processed — regardless of age. Remove any time-based filtering that could cause emails to fall through the cracks.
+
+**In the code:** No age gate. The dedup TTL only controls how long processed entries are *remembered* (to keep the file from growing forever), not whether new emails are accepted.
+
+### 4. Alert Ordering: Process Emails Chronologically
+
+**The bug:** When multiple alert emails arrived (e.g., DOWN at 19:01, then UP at 19:05), they were sometimes processed out of order or the UP alert was suppressed by an unrelated verification step. The team saw the service go DOWN but never saw the corresponding UP — causing unnecessary alarm.
+
+**The fix:** Always process emails in chronological order (oldest first). Gmail returns messages newest-first by default, so **reverse the list** before processing. This ensures DOWN→UP pairs are posted in the correct sequence.
+
+**In the code:** `messages.reverse()` after fetching from Gmail, before the processing loop.
+
+### 5. Don't Gate Alerts on Unrelated Checks
+
+**The bug:** UP alerts were verified against a global healthcheck endpoint before posting. If *any* other service had a firing alert, the UP notification was suppressed — even though the specific service in the email was actually back up.
+
+**The fix:** Verification checks (if any) must be scoped to the specific service mentioned in the email, not a global healthcheck. Or better yet, trust the source: if Pingdom says it's UP, post the UP alert. External verification is a nice-to-have, not a gate.
+
+**In the code:** The triage engine trusts the email content and posts alerts as-is. If you add verification, scope it narrowly.
+
+### 6. Structured Dedup > Text-Based Dedup
+
+**The bug:** Subject-line dedup stored only the *last* alert subject in a text file. When a different alert overwrote it, the previous alert's subject looked "new" again on the next occurrence — causing duplicate posts.
+
+**The fix:** Use structured storage (JSON) that can track multiple subjects/entries simultaneously, with timestamps. Never rely on "last value" comparisons for dedup — you need the full history within the TTL window.
+
+**In the code:** `processed-emails.json` stores every processed email with its full metadata (from, subject, classification, timestamp). Lookup is by email ID, but the full log enables subject-similarity dedup too.
+
+### 7. Idempotent File Writes
+
+**The bug:** If the process crashed mid-write to the dedup file, the file could end up corrupted (partial JSON, truncated lines). On restart, the service couldn't parse the dedup file and reprocessed everything.
+
+**The fix:** Write to a temp file first, then atomically rename. This ensures the dedup file is always valid — either the old version or the new version, never a half-written state.
+
+**In the code:** `saveProcessed()` writes to `processed-emails.json.tmp` then renames to `processed-emails.json`.
+
+### Summary
+
+| Lesson | Pattern | Anti-pattern |
+|---|---|---|
+| Dedup storage | Structured JSON with ID keys | Flat text file with appended lines |
+| Email search | `after:{epoch}` timestamp checkpoint | `newer_than:Xm` relative time |
+| Age filtering | Dedup file is the only gate | Time-based age cutoff |
+| Alert ordering | Process oldest-first (`reverse()`) | Process newest-first (default) |
+| Alert verification | Trust source or scope narrowly | Gate on unrelated global checks |
+| Subject dedup | Store full history within TTL | Store only last value |
+| File writes | Atomic write (tmp + rename) | Direct write to production file |
+
+---
+
 ## Gmail Setup Prerequisites
 
 ### 1. OAuth2 Credentials

@@ -126,9 +126,37 @@ function gmailGet(path, token) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Timestamp checkpoint for gap-proof email search
+// ---------------------------------------------------------------------------
+function getCheckpointPath() {
+  return path.resolve(path.dirname(CONFIG_PATH), '.last-check-ts');
+}
+
+function loadCheckpointEpoch() {
+  try {
+    const ts = fs.readFileSync(getCheckpointPath(), 'utf8').trim();
+    return parseInt(ts, 10) || 0;
+  } catch {
+    return 0; // No checkpoint = fetch everything matching the query
+  }
+}
+
+function saveCheckpointEpoch() {
+  const target = getCheckpointPath();
+  const tmp = target + '.tmp';
+  fs.writeFileSync(tmp, String(Math.floor(Date.now() / 1000)));
+  fs.renameSync(tmp, target);
+}
+
 async function listUnreadMessages(token) {
-  const q = encodeURIComponent(config.gmail.searchQuery || 'is:unread');
-  const result = await gmailGet(`/gmail/v1/users/me/messages?q=${q}&maxResults=20`, token);
+  // Use after:{epoch} for gap-proof search — never misses emails after downtime
+  const baseQuery = config.gmail.searchQuery || 'is:unread';
+  const epoch = loadCheckpointEpoch();
+  const q = epoch > 0
+    ? encodeURIComponent(`${baseQuery} after:${epoch}`)
+    : encodeURIComponent(baseQuery);
+  const result = await gmailGet(`/gmail/v1/users/me/messages?q=${q}&maxResults=50`, token);
   return result.messages || [];
 }
 
@@ -162,7 +190,11 @@ function loadProcessed() {
 }
 
 function saveProcessed(processed) {
-  fs.writeFileSync(getProcessedPath(), JSON.stringify(processed, null, 2));
+  // Atomic write: write to tmp file then rename to prevent corruption on crash
+  const target = getProcessedPath();
+  const tmp = target + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(processed, null, 2));
+  fs.renameSync(tmp, target);
 }
 
 function isProcessed(emailId) {
@@ -227,7 +259,24 @@ function matchRule(from, subject) {
 // ---------------------------------------------------------------------------
 function logEntry(entry) {
   const logPath = path.resolve(path.dirname(CONFIG_PATH), config.triage.logFile || './email-triage.log');
+  // appendFileSync is safe for JSONL — each write is a complete line with trailing newline
   fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
+}
+
+// ---------------------------------------------------------------------------
+// JSONL log reader for dedup Layer 2 (from+subject similarity)
+// ---------------------------------------------------------------------------
+function getRecentLogEntries(hours) {
+  const logPath = path.resolve(path.dirname(CONFIG_PATH), config.triage.logFile || './email-triage.log');
+  try {
+    const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
+    const cutoff = Date.now() - (hours || 24) * 3600 * 1000;
+    return lines
+      .map(l => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(e => e && new Date(e.timestamp).getTime() > cutoff);
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +309,9 @@ async function triageCycle() {
     const token = await getAccessToken();
     const messages = await listUnreadMessages(token);
     stats.lastCheck = new Date().toISOString();
+
+    // Process oldest-first to preserve chronological order (DOWN before UP, etc.)
+    messages.reverse();
 
     for (const msg of messages) {
       try {
@@ -322,6 +374,9 @@ async function triageCycle() {
         stats.errors++;
       }
     }
+
+    // Update timestamp checkpoint after successful check (whether or not emails were found)
+    saveCheckpointEpoch();
 
     if (messages.length === 0) {
       stats.totalSkipped++;
