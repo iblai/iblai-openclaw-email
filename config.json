@@ -5,8 +5,7 @@
     "checkIntervalSeconds": 60,
     "searchQuery": "is:unread",
     "whitelistedDomains": [
-      "ibl.ai",
-      "ibleducation.com"
+      "yourcompany.com"
     ],
     "whitelistedAddresses": []
   },
@@ -36,7 +35,7 @@
       {
         "name": "urgent-ops",
         "match": {
-          "from": "*@ibl.ai",
+          "from": "*@yourcompany.com",
           "subjectContains": [
             "DOWN",
             "alert",
@@ -51,7 +50,7 @@
       {
         "name": "bug-report",
         "match": {
-          "from": "*@ibl.ai",
+          "from": "*@yourcompany.com",
           "subjectContains": [
             "bug",
             "error",
@@ -75,10 +74,10 @@
     ],
     "teams": {
       "ops-team": {
-        "notify": "whatsapp-group-or-channel"
+        "notify": "slack-channel-or-webhook"
       },
       "engineering": {
-        "notify": "whatsapp-group-or-channel"
+        "notify": "slack-channel-or-webhook"
       }
     }
   },

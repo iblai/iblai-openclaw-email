@@ -21,7 +21,7 @@ A zero-dependency Node.js service that polls Gmail on a configurable interval (d
 
 Sub-agents default to [`iblai-router/auto`](https://github.com/iblai/iblai-openclaw-router), which automatically selects the cheapest model capable of handling each task. Users without the router installed can set `models.action` and `models.escalation` to direct model IDs (e.g., `claude-sonnet-4-6`, `claude-opus-4-6`).
 
-**Everything runs locally on your OpenClaw server.** No data is sent to ibl.ai or any third party. The service reads your Gmail via OAuth2, classifies locally via rule matching, and logs results to a local JSONL file.
+**Everything runs locally on your OpenClaw server.** No data is sent to any third party. The service reads your Gmail via OAuth2, classifies locally via rule matching, and logs results to a local JSONL file.
 
 **Install from your terminal:**
 
@@ -100,7 +100,7 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
     "credentialsPath": "~/.openclaw/workspace/skills/google-calendar/credentials.json",
     "checkIntervalSeconds": 60,
     "searchQuery": "is:unread",
-    "whitelistedDomains": ["ibl.ai", "ibleducation.com"],
+    "whitelistedDomains": ["yourcompany.com"],
     "whitelistedAddresses": []
   },
   "models": {
@@ -119,14 +119,14 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
     "rules": [
       {
         "name": "urgent-ops",
-        "match": { "from": "*@ibl.ai", "subjectContains": ["DOWN", "alert", "critical", "urgent"] },
+        "match": { "from": "*@yourcompany.com", "subjectContains": ["DOWN", "alert", "critical", "urgent"] },
         "action": "escalate",
         "assignTo": "ops-team",
         "model": "claude-opus-4-6"
       },
       {
         "name": "bug-report",
-        "match": { "from": "*@ibl.ai", "subjectContains": ["bug", "error", "broken", "500", "404"] },
+        "match": { "from": "*@yourcompany.com", "subjectContains": ["bug", "error", "broken", "500", "404"] },
         "action": "route",
         "assignTo": "engineering",
         "model": "claude-sonnet-4-6"
@@ -139,8 +139,8 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
       }
     ],
     "teams": {
-      "ops-team": { "notify": "whatsapp-group-or-channel" },
-      "engineering": { "notify": "whatsapp-group-or-channel" }
+      "ops-team": { "notify": "slack-channel-or-webhook" },
+      "engineering": { "notify": "slack-channel-or-webhook" }
     }
   },
   "dedup": {
@@ -156,7 +156,7 @@ All configuration lives in `config.json`. The server hot-reloads on changes — 
 |---|---|---|
 | `gmail.checkIntervalSeconds` | Polling frequency | `60` |
 | `gmail.searchQuery` | Gmail search filter | `is:unread` |
-| `gmail.whitelistedDomains` | Only process emails from these domains | `["ibl.ai", "ibleducation.com"]` |
+| `gmail.whitelistedDomains` | Only process emails from these domains | `[]` (allow all) |
 | `gmail.whitelistedAddresses` | Additional individual email addresses to allow | `[]` |
 | `models.classifier` | Cheap model for first-pass classification | `claude-3-5-haiku-20241022` |
 | `models.action` | Model for routing actions (sub-agents) | `iblai-router/auto` |
@@ -198,24 +198,24 @@ Example output:
 ```
 Based on your last 200 emails, I found these patterns:
 
-  📊 ops@ibl.ai (47 emails)
+  📊 alerts@monitoring.yourcompany.com (47 emails)
      Subjects: "DOWN alert: ...", "UP alert: ...", "Sentry: ..."
      → Proposed rule: "ops-alerts" — escalate to ops-team
 
-  📊 *@ibl.ai engineers (38 emails)
+  📊 *@yourcompany.com engineers (38 emails)
      Subjects: "Re: bug in ...", "PR #...", "deploy ..."
      → Proposed rule: "engineering" — route to engineering team
 
-  📊 miguel@ibl.ai (29 emails)
+  📊 ceo@yourcompany.com (29 emails)
      Mixed subjects — forwarded alerts, task assignments, questions
-     → Proposed rule: "vip-miguel" — always escalate (VIP)
+     → Proposed rule: "vip-ceo" — always escalate (VIP)
 
-  📊 *@ibleducation.com (18 emails)
-     Subjects: "Re: LTI setup", "Question about ..."
-     → Proposed rule: "client-support" — route to engineering
+  📊 *@partnerdomain.com (18 emails)
+     Subjects: "Re: integration setup", "Question about ..."
+     → Proposed rule: "partner-support" — route to engineering
 
   📊 noreply@github.com (68 emails)
-     Subjects: "[iblai/iblai-platform] ..."
+     Subjects: "[yourorg/yourrepo] ..."
      → Proposed rule: "github-notifications" — skip (noise)
 
   Write these rules to config.json? (I can adjust any of them first)
@@ -244,20 +244,20 @@ From your answers, the agent generates rules like:
 {
   "rules": [
     {
-      "name": "vip-miguel",
-      "match": { "from": "miguel@ibl.ai" },
+      "name": "vip-ceo",
+      "match": { "from": "ceo@yourcompany.com" },
       "action": "escalate",
       "assignTo": "engineering"
     },
     {
       "name": "ops-alerts",
-      "match": { "from": "*@ibl.ai", "subjectContains": ["DOWN", "UP", "alert", "Pingdom"] },
+      "match": { "from": "*@yourcompany.com", "subjectContains": ["DOWN", "UP", "alert", "critical"] },
       "action": "escalate",
       "assignTo": "ops-team"
     },
     {
       "name": "bug-reports",
-      "match": { "from": "*@ibl.ai", "subjectContains": ["bug", "error", "broken", "500", "404", "crash"] },
+      "match": { "from": "*@yourcompany.com", "subjectContains": ["bug", "error", "broken", "500", "404", "crash"] },
       "action": "route",
       "assignTo": "engineering"
     },
@@ -274,8 +274,8 @@ From your answers, the agent generates rules like:
 
 You can also just describe your setup in one message:
 
-> I get ops alerts from Pingdom, bug reports from my team, and client emails.
-> Ops alerts should go to the fires channel, bugs should become GitHub issues
+> I get monitoring alerts from Pingdom, bug reports from my team, and client emails.
+> Alerts should go to the ops channel, bugs should become GitHub issues
 > assigned to engineering, and client emails should be flagged for me to review.
 
 Your agent will translate that into rules and update `config.json`.
@@ -287,7 +287,7 @@ Your agent will translate that into rules and update `config.json`.
 Every email gets logged to `email-triage.log` as JSONL (one JSON object per line):
 
 ```json
-{"timestamp":"2026-02-18T10:30:00Z","emailId":"19c6...","from":"miguel@ibl.ai","to":"anne@ibl.ai","subject":"Fix the login bug on staging","receivedAt":"2026-02-18T10:29:45Z","classification":"bug-report","action":"route","assignedTo":"engineering","model":"claude-3-5-haiku-20241022","escalated":false,"processedAt":"2026-02-18T10:30:01Z","tokenCost":0.005}
+{"timestamp":"2026-02-18T10:30:00Z","emailId":"abc123...","from":"dev@yourcompany.com","to":"triage@yourcompany.com","subject":"Fix the login bug on staging","receivedAt":"2026-02-18T10:29:45Z","classification":"bug-report","action":"route","assignedTo":"engineering","model":"claude-3-5-haiku-20241022","escalated":false,"processedAt":"2026-02-18T10:30:01Z","tokenCost":0.005}
 ```
 
 | Field | Description |
