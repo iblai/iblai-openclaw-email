@@ -5,7 +5,7 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { extractEmail: _extractEmail, extractHeader: _extractHeader, extractBody: _extractBody, isWhitelisted: _isWhitelisted, matchRule: _matchRule, findSuppressibleDownAlerts: _findSuppressibleDownAlerts } = require('./lib');
+const { extractEmail: _extractEmail, extractHeader: _extractHeader, extractBody: _extractBody, isWhitelisted: _isWhitelisted, matchRule: _matchRule } = require('./lib');
 
 // ---------------------------------------------------------------------------
 // Config
@@ -205,29 +205,6 @@ function markActionDone(emailId) {
   const doneFile = file + '.done';
   try { fs.writeFileSync(doneFile, new Date().toISOString()); } catch {}
   try { fs.unlinkSync(file); } catch {}
-}
-
-// Suppress Pingdom DOWN alerts when a later UP exists for the same service
-function consolidatePingdomAlerts() {
-  try {
-    ensureQueueDir();
-    const files = fs.readdirSync(ACTION_QUEUE_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.done') && !f.endsWith('.processing'));
-    if (files.length < 2) return; // Need at least 2 files to have a DOWN+UP pair
-    const items = [];
-    for (const f of files) {
-      try {
-        const data = JSON.parse(fs.readFileSync(path.join(ACTION_QUEUE_DIR, f), 'utf8'));
-        items.push(data);
-      } catch {}
-    }
-    const suppress = _findSuppressibleDownAlerts(items);
-    for (const emailId of suppress) {
-      console.log(`[triage] SUPPRESSED DOWN alert (UP followed): ${emailId}`);
-      markActionDone(emailId);
-    }
-  } catch (e) {
-    console.error('[triage] Pingdom consolidation error:', e.message);
-  }
 }
 
 // Cleanup old .done markers (>24h)
@@ -538,9 +515,6 @@ async function triageCycle() {
 
     // Update timestamp checkpoint after successful check (whether or not emails were found)
     saveCheckpointEpoch();
-
-    // Suppress Pingdom DOWN alerts if a later UP exists for the same service
-    consolidatePingdomAlerts();
 
     if (messages.length === 0) {
       stats.totalSkipped++;

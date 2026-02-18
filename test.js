@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { extractEmail, extractHeader, extractBody, isWhitelisted, matchRule, extractPingdomService, findSuppressibleDownAlerts } = require('./lib');
+const { extractEmail, extractHeader, extractBody, isWhitelisted, matchRule } = require('./lib');
 
 // Helper: base64url encode
 function b64(str) {
@@ -299,83 +299,5 @@ describe('config hot-reload', () => {
     fs.writeFileSync(cfgPath, JSON.stringify(cfg2));
     const loaded2 = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     assert.equal(loaded2.gmail.checkIntervalSeconds, 60);
-  });
-});
-
-describe('extractPingdomService', () => {
-  it('extracts service from DOWN alert subject', () => {
-    assert.equal(
-      extractPingdomService('DOWN alert: ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app) is DOWN'),
-      'ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app)'
-    );
-  });
-
-  it('extracts service from UP alert subject', () => {
-    assert.equal(
-      extractPingdomService('UP alert: ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app) is UP'),
-      'ORACLE PROD MENTOR (NOT OPENAI) (asgi.data.iblai.app)'
-    );
-  });
-
-  it('returns null for non-Pingdom subjects', () => {
-    assert.equal(extractPingdomService('[Sentry] Something broke'), null);
-  });
-
-  it('handles different service names', () => {
-    assert.equal(
-      extractPingdomService('DOWN alert: PROD PLATFORM (app.iblai.app) is DOWN'),
-      'PROD PLATFORM (app.iblai.app)'
-    );
-  });
-});
-
-describe('findSuppressibleDownAlerts', () => {
-  it('suppresses DOWN when later UP exists for same service', () => {
-    const items = [
-      { emailId: 'a', subject: 'DOWN alert: SVC (x.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-      { emailId: 'b', subject: 'UP alert: SVC (x.com) is UP', date: '2026-02-18T10:05:00Z', classification: 'ops-alerts' },
-    ];
-    assert.deepEqual(findSuppressibleDownAlerts(items), ['a']);
-  });
-
-  it('does not suppress DOWN without matching UP', () => {
-    const items = [
-      { emailId: 'a', subject: 'DOWN alert: SVC (x.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-    ];
-    assert.deepEqual(findSuppressibleDownAlerts(items), []);
-  });
-
-  it('does not suppress DOWN when UP is for a different service', () => {
-    const items = [
-      { emailId: 'a', subject: 'DOWN alert: SVC-A (a.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-      { emailId: 'b', subject: 'UP alert: SVC-B (b.com) is UP', date: '2026-02-18T10:05:00Z', classification: 'ops-alerts' },
-    ];
-    assert.deepEqual(findSuppressibleDownAlerts(items), []);
-  });
-
-  it('does not suppress DOWN when UP came before it', () => {
-    const items = [
-      { emailId: 'a', subject: 'UP alert: SVC (x.com) is UP', date: '2026-02-18T09:00:00Z', classification: 'ops-alerts' },
-      { emailId: 'b', subject: 'DOWN alert: SVC (x.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-    ];
-    assert.deepEqual(findSuppressibleDownAlerts(items), []);
-  });
-
-  it('handles multiple services independently', () => {
-    const items = [
-      { emailId: 'a', subject: 'DOWN alert: SVC-A (a.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-      { emailId: 'b', subject: 'DOWN alert: SVC-B (b.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'ops-alerts' },
-      { emailId: 'c', subject: 'UP alert: SVC-A (a.com) is UP', date: '2026-02-18T10:05:00Z', classification: 'ops-alerts' },
-    ];
-    // Only SVC-A DOWN should be suppressed, SVC-B stays
-    assert.deepEqual(findSuppressibleDownAlerts(items), ['a']);
-  });
-
-  it('ignores non ops-alerts classifications', () => {
-    const items = [
-      { emailId: 'a', subject: 'DOWN alert: SVC (x.com) is DOWN', date: '2026-02-18T10:00:00Z', classification: 'bug-report' },
-      { emailId: 'b', subject: 'UP alert: SVC (x.com) is UP', date: '2026-02-18T10:05:00Z', classification: 'ops-alerts' },
-    ];
-    assert.deepEqual(findSuppressibleDownAlerts(items), []);
   });
 });
