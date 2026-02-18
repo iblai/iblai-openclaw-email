@@ -172,6 +172,52 @@ async function getMessageDetail(token, msgId) {
   return gmailGet(`/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, token);
 }
 
+async function getMessageFull(token, msgId) {
+  return gmailGet(`/gmail/v1/users/me/messages/${msgId}?format=full`, token);
+}
+
+function extractBody(msg) {
+  if (!msg.payload) return '';
+  function decode(data) {
+    if (!data) return '';
+    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  }
+  // Simple message
+  if (msg.payload.body && msg.payload.body.data) return decode(msg.payload.body.data);
+  // Multipart — prefer text/plain
+  const parts = msg.payload.parts || [];
+  for (const p of parts) {
+    if (p.mimeType === 'text/plain' && p.body && p.body.data) return decode(p.body.data);
+  }
+  // Fallback to text/html
+  for (const p of parts) {
+    if (p.mimeType === 'text/html' && p.body && p.body.data) return decode(p.body.data);
+  }
+  // Nested multipart
+  for (const p of parts) {
+    if (p.parts) {
+      for (const sp of p.parts) {
+        if (sp.mimeType === 'text/plain' && sp.body && sp.body.data) return decode(sp.body.data);
+      }
+    }
+  }
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Action queue — writes actionable emails for OpenClaw cron to pick up
+// ---------------------------------------------------------------------------
+const ACTION_QUEUE_DIR = path.resolve(path.dirname(CONFIG_PATH), 'action-queue');
+function ensureQueueDir() {
+  if (!fs.existsSync(ACTION_QUEUE_DIR)) fs.mkdirSync(ACTION_QUEUE_DIR, { recursive: true });
+}
+
+function enqueueAction(item) {
+  ensureQueueDir();
+  const file = path.join(ACTION_QUEUE_DIR, `${item.emailId}.json`);
+  fs.writeFileSync(file, JSON.stringify(item, null, 2));
+}
+
 function extractHeader(msg, name) {
   const h = (msg.payload && msg.payload.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());
   return h ? h.value : '';
@@ -371,10 +417,32 @@ async function triageCycle() {
         const subject = extractHeader(detail, 'Subject');
         const date = extractHeader(detail, 'Date');
 
+        // Pre-check rule to decide if we need the body
+        const preRule = matchRule(from, subject);
+        const needsAction = preRule && (preRule.action === 'escalate' || preRule.action === 'route');
+        let body = '';
+        if (needsAction && !config.shadowMode) {
+          try {
+            const full = await getMessageFull(token, msg.id);
+            body = extractBody(full).slice(0, 8000); // cap body size
+          } catch (e) {
+            console.error(`[triage] Failed to fetch body for ${msg.id}:`, e.message);
+          }
+        }
+
         // Whitelist check
         if (!isWhitelisted(from)) {
           stats.totalNotWhitelisted++;
           markProcessed(msg.id, { from: extractEmail(from), subject, action: 'skipped-not-whitelisted' });
+          continue;
+        }
+
+        // Pre-check: skip rule (drop email silently)
+        const skipCheck = matchRule(from, subject);
+        if (skipCheck && skipCheck.action === 'skip') {
+          stats.totalSkipped++;
+          markProcessed(msg.id, { from: extractEmail(from), subject, action: 'skipped', classification: skipCheck.name });
+          console.log(`[triage] SKIP | ${extractEmail(from)} | ${subject.slice(0, 60)} | rule=${skipCheck.name}`);
           continue;
         }
 
@@ -418,9 +486,21 @@ async function triageCycle() {
         // In shadow mode: log only, don't take action
         if (shadowMode) continue;
 
-        // TODO: In non-shadow mode, trigger sub-agent actions here
-        // - For 'route': spawn sub-agent to create issue + notify engineer
-        // - For 'escalate': spawn sub-agent with escalation model
+        // Enqueue actionable emails for OpenClaw cron to process
+        if (action === 'escalate' || action === 'route') {
+          enqueueAction({
+            emailId: msg.id,
+            from: entry.from,
+            subject,
+            body,
+            date,
+            action,
+            classification: entry.classification,
+            assignTo: assignTo || null,
+            queuedAt: new Date().toISOString(),
+          });
+          console.log(`[triage] QUEUED action for ${entry.from}: ${subject.slice(0, 60)}`);
+        }
       } catch (e) {
         console.error(`[triage] Error processing message ${msg.id}:`, e.message);
         stats.errors++;
